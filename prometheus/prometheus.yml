@@ -1,0 +1,133 @@
+# Prometheus configuration for Shopping Cart Service monitoring
+# This configuration defines scrape jobs, rules, and alerting settings
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'shopping-cart-cluster'
+    region: 'local'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Load alerting rules
+rule_files:
+  - "rules/*.yml"
+
+# Scrape job configurations
+scrape_configs:
+  # Shopping Cart Service
+  - job_name: 'shopping-cart-service'
+    static_configs:
+      - targets: ['cart-service:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    scrape_timeout: 5s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: cart-service:8080
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  # Grafana monitoring
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  # AlertManager monitoring
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+  # Redis monitoring (if enabled)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+
+# Storage configuration
+storage:
+  tsdb:
+    retention_time: 90d
+    min_block_duration: 2h
+    max_block_duration: 25h
+
+# Recording rules for performance optimization
+recording_rules:
+  - name: shopping_cart_aggregations
+    interval: 30s
+    rules:
+      # Request rate by endpoint
+      - record: shopping_cart:http_requests_rate5m
+        expr: rate(http_requests_total[5m])
+        labels:
+          service: "shopping-cart-service"
+
+      # Error rate by endpoint
+      - record: shopping_cart:http_error_rate5m
+        expr: rate(http_requests_errors_total[5m])
+        labels:
+          service: "shopping-cart-service"
+
+      # Average response time by endpoint
+      - record: shopping_cart:http_request_duration_avg5m
+        expr: rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])
+        labels:
+          service: "shopping-cart-service"
+
+      # P95 response time by endpoint
+      - record: shopping_cart:http_request_duration_p95_5m
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          service: "shopping-cart-service"
+
+      # P99 response time by endpoint
+      - record: shopping_cart:http_request_duration_p99_5m
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+        labels:
+          service: "shopping-cart-service"
+
+      # Total active carts
+      - record: shopping_cart:active_carts_total
+        expr: active_users_total
+        labels:
+          service: "shopping-cart-service"
+
+      # Total items in all carts
+      - record: shopping_cart:total_items
+        expr: cart_items_total
+        labels:
+          service: "shopping-cart-service"
+
+# Remote write configuration (for SigNoz or other TSDB)
+# Uncomment and configure if using external storage
+# remote_write:
+#   - url: "http://signoz-otel-collector:4318/v1/metrics"
+#     headers:
+#       Authorization: "Bearer YOUR_TOKEN_HERE"
+#     queue_config:
+#       max_samples_per_send: 1000
+#       max_shards: 200
+#       capacity: 2500
